@@ -31,7 +31,9 @@ pub mod disable_loading_text;
 pub mod emit_sound;
 pub mod fade_remove;
 pub mod fix_widescreen;
+pub mod force_emit_viewentity_player;
 pub mod force_fov;
+pub mod gsr;
 pub mod help;
 pub mod hud;
 pub mod hud_scale;
@@ -100,7 +102,9 @@ pub static MODULES: &[&dyn Module] = &[
     &emit_sound::EmitSound,
     &fade_remove::FadeRemove,
     &fix_widescreen::FixWidescreen,
+    &force_emit_viewentity_player::ForceEmitViewentityPlayer,
     &force_fov::ForceFov,
+    &gsr::GSR,
     &help::Help,
     &hud::Hud,
     &hud_scale::HudScale,

@@ -17,6 +17,7 @@ bxt-macros = { path = "bxt-macros" }
 bxt-patterns = { path = "bxt-patterns" }
 bxt-strafe = { path = "bxt-strafe" }
 byte-slice-cast = "1.2.2"
+bytemuck = "1.25.0"
 color-eyre = { version = "0.6.2", default-features = false }
 crossbeam-channel = "0.5.8"
 git-version = "0.3.5"

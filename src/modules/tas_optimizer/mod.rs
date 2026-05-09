@@ -18,7 +18,7 @@ use super::Module;
 use crate::ffi::edict;
 use crate::handler;
 use crate::hooks::bxt;
-use crate::hooks::engine::{self, con_print};
+use crate::hooks::engine::{self, cactive_t, con_print};
 use crate::modules::commands::{self, Command};
 use crate::utils::*;
 
@@ -784,7 +784,7 @@ pub unsafe fn maybe_receive_messages_from_remote_server(marker: MainThreadMarker
     };
 
     let client_state = (*cls).state;
-    if client_state != 1 && client_state != 5 {
+    if client_state != cactive_t::ca_disconnected && client_state != cactive_t::ca_active {
         return;
     }
 

@@ -15,7 +15,7 @@ use super::Module;
 use crate::ffi::buttons::Buttons;
 use crate::ffi::usercmd::usercmd_s;
 use crate::handler;
-use crate::hooks::engine::{self, con_print};
+use crate::hooks::engine::{self, cactive_t, con_print};
 use crate::hooks::server;
 use crate::modules::commands::{self, Command};
 use crate::utils::*;
@@ -212,7 +212,7 @@ pub unsafe fn on_cl_move(marker: MainThreadMarker) {
     };
 
     let client_state = (*engine::cls.get(marker)).state;
-    if client_state != 4 && client_state != 5 {
+    if client_state != cactive_t::ca_uninitialized && client_state != cactive_t::ca_active {
         return;
     }
 
@@ -232,7 +232,7 @@ pub unsafe fn on_sv_frame_start(marker: MainThreadMarker) {
     };
 
     let client_state = (*engine::cls.get(marker)).state;
-    if client_state != 4 && client_state != 5 {
+    if client_state != cactive_t::ca_uninitialized && client_state != cactive_t::ca_active {
         return;
     }
 

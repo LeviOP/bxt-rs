@@ -11,7 +11,7 @@ use crate::ffi::edict;
 use crate::ffi::playermove::playermove_s;
 use crate::ffi::usercmd::usercmd_s;
 use crate::handler;
-use crate::hooks::engine::{self, con_print, RngState};
+use crate::hooks::engine::{self, cactive_t, con_print, RngState};
 use crate::hooks::server;
 use crate::modules::commands::{self, Command};
 use crate::modules::cvars::{self, CVar};
@@ -268,7 +268,7 @@ impl TasLog {
     fn begin_physics_frame(
         &mut self,
         frame_time: Option<f64>,
-        client_state: Option<i32>,
+        client_state: Option<cactive_t>,
         is_paused: Option<bool>,
         command_buffer: Option<&str>,
         rng_state: Option<RngState>,
@@ -282,8 +282,8 @@ impl TasLog {
         }
 
         if let Some(client_state) = client_state {
-            if client_state != 5 {
-                self.ser.entry("cls", &client_state)?;
+            if client_state != cactive_t::ca_active {
+                self.ser.entry("cls", &(client_state as i32))?;
             }
         }
 

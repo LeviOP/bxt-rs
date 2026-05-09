@@ -36,7 +36,7 @@ use crate::ffi::cvar::cvar_s;
 use crate::ffi::usercmd::usercmd_s;
 use crate::handler;
 use crate::hooks::bxt::{OnTasPlaybackFrameData, BXT_IS_TAS_EDITOR_ACTIVE};
-use crate::hooks::engine::con_print;
+use crate::hooks::engine::{cactive_t, con_print};
 use crate::hooks::{bxt, client, engine, sdl};
 use crate::modules::tas_studio::editor::{CameraViewAdjustmentMode, MaxAccelYawOffsetMode};
 use crate::utils::*;
@@ -1583,7 +1583,7 @@ pub unsafe fn maybe_receive_messages_from_remote_server(marker: MainThreadMarker
     }
 
     let client_state = (*engine::cls.get(marker)).state;
-    if client_state != 1 && client_state != 5 {
+    if client_state != cactive_t::ca_disconnected && client_state != cactive_t::ca_active {
         return;
     }
 

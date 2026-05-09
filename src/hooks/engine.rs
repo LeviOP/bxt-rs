@@ -12,19 +12,33 @@ use std::str::FromStr;
 use bxt_macros::pattern;
 use bxt_patterns::Patterns;
 
-use crate::ffi::com_model::{mleaf_s, model_s};
+use crate::ffi::beamdef::BEAM;
+use crate::ffi::cl_entity::{cl_entity_s, cl_entity_t, efrag_s};
+use crate::ffi::com_model::{
+    cache_user_t, decal_t, mleaf_s, model_s, msurface_t, player_info_t, texture_t,
+};
 use crate::ffi::command::cmd_function_s;
+use crate::ffi::crc::CRC32_t;
 use crate::ffi::cvar::cvar_s;
+use crate::ffi::dlight::dlight_t;
 use crate::ffi::edict::edict_s;
+use crate::ffi::edict::{byte, qboolean};
+use crate::ffi::entity_state::clientdata_t;
+use crate::ffi::entity_state::{entity_state_t, local_state_t};
 use crate::ffi::playermove::playermove_s;
+use crate::ffi::progs::event_state_t;
+use crate::ffi::r_efx::TEMPENTITY;
 use crate::ffi::triangleapi::triangleapi_s;
 use crate::ffi::usercmd::usercmd_s;
+use crate::ffi::weaponinfo::weapon_data_t;
 #[cfg(windows)]
 use crate::hooks::opengl32;
 use crate::hooks::{bxt, sdl, server};
 use crate::modules::*;
 use crate::utils::*;
 
+pub static AppendTEntity: Pointer<unsafe extern "C" fn(pEnt: *mut cl_entity_t)> =
+    Pointer::empty(b"AppendTEntity\0");
 pub static build_number: Pointer<unsafe extern "C" fn() -> c_int> = Pointer::empty_patterns(
     b"build_number\0",
     // To find, search for "Half-Life %i/%s (hw build %d)". This function is
@@ -88,6 +102,8 @@ pub static CL_Disconnect: Pointer<unsafe extern "C" fn()> = Pointer::empty_patte
     my_CL_Disconnect as _,
 );
 pub static cl_funcs: Pointer<*mut ClientDllFunctions> = Pointer::empty(b"cl_funcs\0");
+pub static CL_FxBlend: Pointer<unsafe extern "C" fn(*mut cl_entity_t) -> c_int> =
+    Pointer::empty(b"CL_FxBlend\0");
 pub static CL_GameDir_f: Pointer<unsafe extern "C" fn()> = Pointer::empty_patterns(
     b"CL_GameDir_f\0",
     // To find, search for "gamedir is ".
@@ -113,6 +129,10 @@ pub static CL_IsSpectateOnly: Pointer<unsafe extern "C" fn() -> c_int> = Pointer
     ]),
     null_mut(),
 );
+pub static CL_LinkPacketEntities: Pointer<unsafe extern "C" fn()> =
+    Pointer::empty(b"CL_LinkPacketEntities\0");
+pub static CL_LinkPlayers: Pointer<unsafe extern "C" fn()> =
+    Pointer::empty_patterns(b"CL_LinkPlayers\0", Patterns(&[]), my_CL_LinkPlayers as _);
 pub static cl_lightstyle: Pointer<*mut [lightstyle_t; 64]> = Pointer::empty(b"cl_lightstyle\0");
 pub static CL_Move: Pointer<unsafe extern "C" fn()> = Pointer::empty_patterns(
     b"CL_Move\0",
@@ -145,6 +165,7 @@ pub static CL_PlayDemo_f: Pointer<unsafe extern "C" fn()> = Pointer::empty_patte
     ]),
     my_CL_PlayDemo_f as _,
 );
+pub static CL_TempEntInit: Pointer<unsafe extern "C" fn()> = Pointer::empty(b"CL_TempEntInit\0");
 pub static CL_ViewDemo_f: Pointer<unsafe extern "C" fn()> = Pointer::empty_patterns(
     b"CL_ViewDemo_f\0",
     // To find, search for "viewdemo not available".
@@ -191,6 +212,16 @@ pub static ClientDLL_IsThirdPerson: Pointer<unsafe extern "C" fn() -> c_int> =
         my_ClientDLL_IsThirdPerson as _,
     );
 pub static cl: Pointer<*mut client_state_t> = Pointer::empty(b"cl\0");
+pub static cl_beamentities: Pointer<*mut [*mut cl_entity_t; 512]> =
+    Pointer::empty(b"cl_beamentities\0");
+pub static cl_dlights: Pointer<*mut [dlight_t; 32]> = Pointer::empty(b"cl_dlights\0");
+pub static cl_elights: Pointer<*mut [dlight_t; 64]> = Pointer::empty(b"cl_elights\0");
+pub static cl_entities: Pointer<*mut *mut cl_entity_t> = Pointer::empty(
+    // Not a real symbol name.
+    b"cl_entities\0",
+);
+pub static cl_numbeamentities: Pointer<*mut c_int> = Pointer::empty(b"cl_numbeamentities\0");
+pub static cl_numvisedicts: Pointer<*mut c_int> = Pointer::empty(b"cl_numvisedicts\0");
 pub static cl_stats: Pointer<*mut [i32; 32]> = Pointer::empty(
     // Not a real symbol name.
     b"cl_stats\0",
@@ -203,6 +234,7 @@ pub static cl_viewent_viewmodel: Pointer<*mut cl_entity_s_viewmodel> = Pointer::
     // Not a real symbol name.
     b"cl_viewent_viewmodel\0",
 );
+pub static cl_visedicts: Pointer<*mut [*mut cl_entity_t; 512]> = Pointer::empty(b"cl_visedicts\0");
 pub static cls: Pointer<*mut client_static_s> = Pointer::empty(b"cls\0");
 pub static cls_demoframecount: Pointer<*mut c_int> = Pointer::empty(
     // Not a real symbol name.
@@ -212,6 +244,7 @@ pub static cls_demos: Pointer<*mut client_static_s_demos> = Pointer::empty(
     // Not a real symbol name.
     b"cls_demos\0",
 );
+pub static currententity: Pointer<*mut *mut cl_entity_t> = Pointer::empty(b"currententity\0");
 pub static Cmd_AddMallocCommand: Pointer<
     unsafe extern "C" fn(*const c_char, unsafe extern "C" fn(), c_int),
 > = Pointer::empty_patterns(
@@ -278,6 +311,13 @@ pub static Cvar_RegisterVariable: Pointer<unsafe extern "C" fn(*mut cvar_s)> =
         null_mut(),
     );
 pub static cvar_vars: Pointer<*mut *mut cvar_s> = Pointer::empty(b"cvar_vars\0");
+pub static decal_names: Pointer<*mut [[c_char; 16]; 512]> = Pointer::empty(b"decal_names\0");
+pub static Draw_DecalCount: Pointer<unsafe extern "C" fn() -> c_int> =
+    Pointer::empty(b"Draw_DecalCount\0");
+pub static Draw_DecalIndex: Pointer<unsafe extern "C" fn(c_int) -> c_int> =
+    Pointer::empty(b"Draw_DecalIndex\0");
+pub static Draw_DecalTexture: Pointer<unsafe extern "C" fn(c_int) -> *const texture_t> =
+    Pointer::empty(b"Draw_DecalTexture\0");
 pub static Draw_FillRGBABlend: Pointer<
     unsafe extern "C" fn(c_int, c_int, c_int, c_int, c_int, c_int, c_int, c_int),
 > = Pointer::empty_patterns(
@@ -335,6 +375,34 @@ pub static GL_BeginRendering: Pointer<
     ]),
     null_mut(),
 );
+pub static gDecalCount: Pointer<*mut c_int> = Pointer::empty(
+    // Not a real symbol name.
+    b"gDecalCount\0",
+);
+pub static gDecalPool: Pointer<*mut [decal_t; 4096]> = Pointer::empty(
+    // Not a real symbol name.
+    b"gDecalPool\0",
+);
+pub static gDecalSurfCount: Pointer<*mut c_int> = Pointer::empty(
+    // Not a real symbol name.
+    b"gDecalSurfCount\0",
+);
+pub static gDecalSurfs: Pointer<*mut [*mut msurface_t; 500]> = Pointer::empty(
+    // Not a real symbol name.
+    b"gDecalSurfs\0",
+);
+pub static gpActiveBeams: Pointer<*mut *mut BEAM> = Pointer::empty(
+    // Not a real symbol name.
+    b"gpActiveBeams\0",
+);
+pub static gpTempEntActive: Pointer<*mut *mut TEMPENTITY> = Pointer::empty(
+    // Not a real symbol name.
+    b"gpTempEntActive\0",
+);
+pub static gTempEnts: Pointer<*mut [TEMPENTITY; 500]> = Pointer::empty(
+    // Not a real symbol name.
+    b"gTempEnts\0",
+);
 pub static gEntityInterface: Pointer<*mut DllFunctions> = Pointer::empty(b"gEntityInterface\0");
 pub static gLoadSky: Pointer<*mut c_int> = Pointer::empty(b"gLoadSky\0");
 pub static g_svmove: Pointer<*mut playermove_s> = Pointer::empty(b"g_svmove\0");
@@ -369,6 +437,8 @@ pub static LoadEntityDLLs: Pointer<unsafe extern "C" fn(*const c_char)> = Pointe
     ]),
     my_LoadEntityDLLs as _,
 );
+pub static mod_known: Pointer<*mut [model_s; 1024]> = Pointer::empty(b"mod_known\0");
+pub static mod_numknown: Pointer<*mut c_int> = Pointer::empty(b"mod_numknown\0");
 pub static Mod_LeafPVS: Pointer<unsafe extern "C" fn(*mut mleaf_s, *mut model_s) -> *mut c_void> =
     Pointer::empty_patterns(
         b"Mod_LeafPVS\0",
@@ -542,6 +612,10 @@ pub static Mem_Free: Pointer<unsafe extern "C" fn(*mut c_void)> = Pointer::empty
     null_mut(),
 );
 pub static movevars: Pointer<*mut movevars_s> = Pointer::empty(b"movevars\0");
+pub static numTransObjs: Pointer<*mut c_int> = Pointer::empty(
+    // Not a real symbol name.
+    b"numTransObjs\0",
+);
 pub static paintbuffer: Pointer<*mut [portable_samplepair_t; 1026]> =
     Pointer::empty(b"paintbuffer\0");
 pub static paintedtime: Pointer<*mut c_int> = Pointer::empty(b"paintedtime\0");
@@ -575,8 +649,18 @@ pub static r_refdef_viewangles: Pointer<*mut [c_float; 3]> = Pointer::empty(
     // Not a real symbol name.
     b"r_refdef_viewangles\0",
 );
+pub static R_BeamAlloc: Pointer<unsafe extern "C" fn() -> *mut BEAM> =
+    Pointer::empty(b"R_BeamAlloc\0");
+pub static R_BeamCull: Pointer<
+    unsafe extern "C" fn(start: *mut c_float, end: *mut c_float, pvsOnly: c_int) -> c_int,
+> = Pointer::empty(b"R_BeamCull\0");
+// pub static R_DrawBeamEntList: Pointer<unsafe extern "C" fn(frametime: c_float)> = Pointer::empty(b"R_DrawBeamEntList\0");
+pub static R_BeamGetAttachmentPoint: Pointer<
+    unsafe extern "C" fn(ent: *mut cl_entity_t, attachment: c_int) -> *mut c_float,
+> = Pointer::empty(b"R_BeamGetAttachmentPoint\0");
+pub static R_DecalInit: Pointer<unsafe extern "C" fn()> = Pointer::empty(b"R_DecalInit\0");
 pub static R_DrawSequentialPoly: Pointer<
-    unsafe extern "C" fn(*mut c_void, *mut c_int) -> *mut c_void,
+    unsafe extern "C" fn(*mut msurface_t, *mut c_int) -> *mut c_void,
 > = Pointer::empty_patterns(
     b"R_DrawSequentialPoly\0",
     // To find, search for "Too many decal surfaces!\n". This string will be used once in
@@ -625,6 +709,12 @@ pub static R_DrawSkyBox: Pointer<unsafe extern "C" fn()> = Pointer::empty_patter
     ]),
     my_R_DrawSkyBox as _,
 );
+pub static R_DrawTEntitiesOnList: Pointer<unsafe extern "C" fn(clientOnly: qboolean)> =
+    Pointer::empty_patterns(
+        b"R_DrawTEntitiesOnList\0",
+        Patterns(&[]),
+        my_R_DrawTEntitiesOnList as _,
+    );
 pub static R_DrawViewModel: Pointer<unsafe extern "C" fn()> = Pointer::empty_patterns(
     // To find, search for "R_RenderView". This is R_RenderView.
     // There will be an assignment of `mirror = false` and a function call follows.
@@ -641,6 +731,12 @@ pub static R_DrawViewModel: Pointer<unsafe extern "C" fn()> = Pointer::empty_pat
     ]),
     my_R_DrawViewModel as _,
 );
+pub static R_GetAttachmentPoint: Pointer<
+    unsafe extern "C" fn(entity: c_int, attachment: c_int) -> *mut c_float,
+> = Pointer::empty(b"R_GetAttachmentPoint\0");
+pub static R_GetBeamAttachmentEntity: Pointer<
+    unsafe extern "C" fn(index: c_int) -> *mut cl_entity_t,
+> = Pointer::empty(b"R_GetBeamAttachmentEntity\0");
 pub static R_LoadSkys: Pointer<unsafe extern "C" fn()> = Pointer::empty_patterns(
     b"R_LoadSkys\0",
     // To find, search for "done\n".
@@ -686,6 +782,11 @@ pub static R_SetFrustum: Pointer<unsafe extern "C" fn()> = Pointer::empty_patter
         pattern!(55 8B EC 83 EC 0C A1 ?? ?? ?? ?? 89 45 ?? DB 05),
     ]),
     my_R_SetFrustum as _,
+);
+pub static R_StudioClientEvents: Pointer<unsafe extern "C" fn()> = Pointer::empty_patterns(
+    b"R_StudioClientEvents\0",
+    Patterns(&[]),
+    my_R_StudioClientEvents as _,
 );
 pub static ReleaseEntityDlls: Pointer<unsafe extern "C" fn()> = Pointer::empty_patterns(
     b"ReleaseEntityDlls\0",
@@ -915,6 +1016,10 @@ pub static Sys_VID_FlipScreen_old: Pointer<unsafe extern "system" fn(*mut c_void
         ]),
         my_Sys_VID_FlipScreen_old as _,
     );
+pub static transObjects: Pointer<*mut *mut transObjRef> = Pointer::empty(
+    // Not a real symbol name.
+    b"transObjects\0",
+);
 pub static tri: Pointer<*const triangleapi_s> = Pointer::empty(b"tri\0");
 pub static V_ApplyShake: Pointer<unsafe extern "C" fn(*mut [f32; 3], *mut [f32; 3], c_float)> =
     Pointer::empty_patterns(
@@ -1010,6 +1115,7 @@ pub static Z_Free: Pointer<unsafe extern "C" fn(*mut c_void)> = Pointer::empty_p
 pub static client_s_edict_offset: MainThreadCell<Option<usize>> = MainThreadCell::new(None);
 
 static POINTERS: &[&dyn PointerTrait] = &[
+    &AppendTEntity,
     &build_number,
     &CBaseUI__HideGameUI,
     &Cbuf_AddFilteredText,
@@ -1018,23 +1124,35 @@ static POINTERS: &[&dyn PointerTrait] = &[
     &Cbuf_InsertText,
     &CL_Disconnect,
     &cl_funcs,
+    &CL_FxBlend,
     &CL_GameDir_f,
     &CL_IsSpectateOnly,
     &cl_lightstyle,
+    &CL_LinkPacketEntities,
+    &CL_LinkPlayers,
     &CL_Move,
     &CL_Parse_LightStyle,
     &CL_PlayDemo_f,
+    &CL_TempEntInit,
     &CL_ViewDemo_f,
     &ClientDLL_Init,
     &ClientDLL_DrawTransparentTriangles,
     &ClientDLL_IsThirdPerson,
     &cl,
+    &cl_dlights,
+    &cl_beamentities,
+    &cl_elights,
+    &cl_entities,
+    &cl_numbeamentities,
+    &cl_numvisedicts,
     &cl_stats,
     &cl_viewent,
     &cl_viewent_viewmodel,
+    &cl_visedicts,
     &cls,
     &cls_demoframecount,
     &cls_demos,
+    &currententity,
     &Cmd_AddMallocCommand,
     &Cmd_Argc,
     &Cmd_Argv,
@@ -1044,16 +1162,29 @@ static POINTERS: &[&dyn PointerTrait] = &[
     &com_gamedir,
     &Cvar_RegisterVariable,
     &cvar_vars,
+    &decal_names,
     &DrawCrosshair,
+    &Draw_DecalCount,
+    &Draw_DecalIndex,
+    &Draw_DecalTexture,
     &Draw_FillRGBABlend,
     &Draw_String,
     &frametime_remainder,
     &GL_BeginRendering,
+    &gDecalCount,
+    &gDecalPool,
+    &gDecalSurfCount,
+    &gDecalSurfs,
+    &gpActiveBeams,
+    &gpTempEntActive,
+    &gTempEnts,
     &gEntityInterface,
     &gLoadSky,
     &g_svmove,
     &Key_Event,
     &LoadEntityDLLs,
+    &mod_known,
+    &mod_numknown,
     &Mod_LeafPVS,
     &Host_FilterTime,
     &host_frametime,
@@ -1069,6 +1200,7 @@ static POINTERS: &[&dyn PointerTrait] = &[
     &listener_origin,
     &Memory_Init,
     &Mem_Free,
+    &numTransObjs,
     &paintbuffer,
     &paintedtime,
     &pmove,
@@ -1079,13 +1211,22 @@ static POINTERS: &[&dyn PointerTrait] = &[
     &r_refdef,
     &r_refdef_vieworg,
     &r_refdef_viewangles,
+    &R_BeamAlloc,
+    &R_BeamCull,
+    &R_BeamGetAttachmentPoint,
     &R_RenderView,
     &R_SetFrustum,
+    &R_StudioClientEvents,
     &ReleaseEntityDlls,
     &R_Clear,
+    // &R_DrawBeamEntList,
+    &R_DecalInit,
     &R_DrawSequentialPoly,
     &R_DrawSkyBox,
+    &R_DrawTEntitiesOnList,
     &R_DrawViewModel,
+    &R_GetAttachmentPoint,
+    &R_GetBeamAttachmentEntity,
     &R_LoadSkys,
     &R_PreDrawViewModel,
     &S_PaintChannels,
@@ -1111,6 +1252,7 @@ static POINTERS: &[&dyn PointerTrait] = &[
     &SV_StartSound,
     &Sys_VID_FlipScreen,
     &Sys_VID_FlipScreen_old,
+    &transObjects,
     &tri,
     &V_ApplyShake,
     &V_FadeAlpha,
@@ -1230,24 +1372,241 @@ pub struct dma_t {
 }
 
 #[repr(C)]
-pub struct cl_entity_s {
-    pub index: c_int,
-}
-
-#[repr(C)]
 pub struct cl_entity_s_viewmodel {
     pub origin: [c_float; 3],
     pub angles: [c_float; 3],
 }
 
 #[repr(C)]
+#[derive(Debug)]
+pub struct resource_t {
+    pub szFileName: [c_char; 64],
+    pub _type: c_int, //enum
+    pub nIndex: c_int,
+    pub nDownloadSize: c_int,
+    pub ucFlags: c_uchar,
+
+    pub rgucMD5_hash: [c_uchar; 16],
+    pub playernum: c_uchar,
+
+    pub rguc_reserved: [c_uchar; 32],
+    pub pNext: *mut resource_t,
+    pub pPrev: *mut resource_t,
+}
+
+#[repr(C)]
+#[derive(Debug)]
+pub struct packet_entities_t {
+    pub num_entities: c_int,
+
+    // THIS CHANGES AFTER HL25
+    pub flags: [byte; 32],
+    pub entities: *mut entity_state_t,
+}
+
+#[repr(C)]
+#[derive(Debug)]
+pub struct frame_t {
+    pub receivedtime: c_double,
+    pub latency: c_double,
+
+    pub invalid: qboolean,
+    pub choked: qboolean,
+
+    pub playerstate: [entity_state_t; 32],
+
+    pub time: c_double,
+    pub clientdata: clientdata_t,
+    pub weapondata: [weapon_data_t; 64],
+    pub packet_entities: packet_entities_t,
+
+    pub clientbytes: c_ushort,
+    pub playerinfobytes: c_ushort,
+    pub packetentitybytes: c_ushort,
+    pub tentitybytes: c_ushort,
+    pub soundbytes: c_ushort,
+    pub eventbytes: c_ushort,
+    pub usrbytes: c_ushort,
+    pub voicebytes: c_ushort,
+    pub msgbytes: c_ushort,
+}
+
+#[repr(C)]
+#[derive(Debug)]
+pub struct cmd_t {
+    cmd: usercmd_s,
+    senttime: c_float,
+    receivedtime: c_float,
+    frame_lerp: c_float,
+    processedfuncs: qboolean,
+    heldback: qboolean,
+    sendsize: c_int,
+}
+
+#[repr(C)]
+#[derive(Debug)]
+pub struct event_t {
+    pub index: c_ushort,
+    pub filename: *const c_char,
+    pub filesize: c_int,
+    pub pszScript: *const c_char,
+}
+
+#[repr(C)]
+#[derive(Debug)]
+pub struct sfx_t {
+    pub name: [c_char; 64],
+    pub cache: cache_user_t,
+    pub servercount: c_int,
+}
+
+#[repr(C)]
+#[derive(Debug)]
+pub struct consistency_t {
+    pub filename: *mut c_char,
+    pub issound: c_int,
+    pub orig_index: c_int,
+    pub value: c_int,
+    pub check_type: c_int,
+    pub mins: [c_float; 3],
+    pub maxs: [c_float; 3],
+}
+
+#[repr(C)]
+#[derive(Debug)]
 pub struct client_state_t {
     pub max_edicts: c_int,
+
+    pub resourcesonhand: resource_t,
+    pub resourcesneeded: resource_t,
+    pub resourcelist: [resource_t; 1280],
+    pub num_resources: c_int,
+
+    pub need_force_consistency_response: c_uint,
+
+    pub serverinfo: [c_char; 512],
+
+    pub servercount: c_int,
+
+    pub validsequence: c_int,
+
+    pub parsecount: c_int,
+    pub parsecountmod: c_int,
+
+    pub stats: [c_int; 32],
+
+    pub weapons: c_int,
+
+    pub cmd: usercmd_s,
+
+    pub viewangles: [c_float; 3],
+
+    pub punchangle: [c_float; 3],
+    pub crosshairangle: [c_float; 3],
+    pub simorg: [c_float; 3],
+    pub simvel: [c_float; 3],
+    pub simangles: [c_float; 3],
+    pub predicted_origins: [[c_float; 3]; 64],
+    pub prediction_error: [c_float; 3],
+
+    pub idealpitch: c_float,
+
+    pub viewheight: [c_float; 3],
+
+    pub sf: [u8; 24], // make a type for bro :)
+
+    pub paused: c_uint, // not sure....
+
+    pub onground: c_int,
+    pub moving: c_int,
+    pub waterlevel: c_int,
+    pub usehull: c_int,
+
+    pub maxspeed: c_float,
+
+    pub pushmsec: c_int,
+    pub light_level: c_int,
+    pub intermission: c_int,
+
+    pub mtime: [c_double; 2],
+    pub time: c_double,
+    pub oldtime: c_double,
+
+    pub frames: [frame_t; 64],
+
+    pub commands: [cmd_t; 64],
+
+    pub predicted_frames: [local_state_t; 64],
+    pub delta_sequence: c_int,
+
+    pub playernum: c_int,
+    pub event_precache: [event_t; 256],
+
+    pub model_precache: [*mut model_s; 512],
+    pub model_precache_count: c_int,
+
+    pub sound_precache: [*mut sfx_t; 512],
+
+    pub consistency_list: [consistency_t; 512],
+    pub num_consistency: c_int,
+
+    pub highentity: c_int,
+    pub levelname: [c_char; 40],
+
+    pub maxclients: c_int,
+
+    pub gametype: c_int,
+    pub viewentity: c_int,
+
+    pub worldmodel: *mut model_s,
+
+    pub free_efrags: *mut efrag_s,
+
+    pub num_entities: c_int,
+    pub num_statics: c_int,
+
+    pub viewent: cl_entity_t,
+
+    pub cdtrack: c_int,
+    pub looptrack: c_int,
+
+    pub serverCRC: CRC32_t,
+
+    pub clientdllmd5: [byte; 16],
+
+    pub weaponstarttime: c_float,
+    pub weaponsequence: c_int,
+
+    pub fPrecaching: c_int,
+
+    pub pLight: *mut dlight_t,
+    pub players: [player_info_t; 32],
+
+    pub instanced_baseline: [entity_state_t; 64],
+
+    pub instanced_baseline_number: c_int,
+
+    pub mapCRC: CRC32_t,
+
+    pub events: event_state_t,
+
+    pub downloadUrl: [c_char; 128],
+}
+
+#[repr(i32)]
+#[derive(PartialEq, Clone, Copy)]
+pub enum cactive_t {
+    ca_dedicated,
+    ca_disconnected,
+    ca_connecting,
+    ca_connected,
+    ca_uninitialized,
+    ca_active,
 }
 
 #[repr(C)]
 pub struct client_static_s {
-    pub state: c_int,
+    pub state: cactive_t,
 }
 
 #[repr(C)]
@@ -1312,6 +1671,13 @@ pub struct SCREENINFO {
     pub iFlags: c_int,
     pub iCharHeight: c_int,
     pub charWidths: [c_short; 256],
+}
+
+#[repr(C)]
+#[derive(Debug)]
+pub struct transObjRef {
+    pub pEnt: *mut cl_entity_t,
+    pub distance: c_float,
 }
 
 #[repr(C)]
@@ -1522,17 +1888,27 @@ unsafe fn find_pointers(marker: MainThreadMarker) {
         pointer.set(marker, ptr);
     }
 
+    cl_entities.set(marker, CL_LinkPacketEntities.by_offset(marker, 101));
     cl_stats.set(marker, cl.offset(marker, 174892));
     cl_viewent.set(marker, cl.offset(marker, 1717500));
     cl_viewent_viewmodel.set(marker, cl_viewent.offset(marker, 2888));
     cls_demoframecount.set(marker, cls.offset(marker, 16776));
     cls_demos.set(marker, cls.offset(marker, 15960));
     frametime_remainder.set(marker, CL_Move.by_offset(marker, 452));
+    gDecalCount.set(marker, R_DecalInit.by_offset(marker, 33));
+    gDecalPool.set(marker, R_DecalInit.by_offset(marker, 21));
+    // gDecalSurfCount.set(marker, R_DrawDecals.by_offset(marker, 9));
+    // gDecalSurfs.set(marker, R_DrawDecals.by_offset(marker, 151));
+    gpActiveBeams.set(marker, R_BeamAlloc.by_offset(marker, 19));
+    gpTempEntActive.set(marker, CL_TempEntInit.by_offset(marker, 96));
+    gTempEnts.set(marker, CL_TempEntInit.by_offset(marker, 21));
     idum.set(marker, ran1.by_offset(marker, 2));
+    numTransObjs.set(marker, AppendTEntity.by_offset(marker, 11));
     ran1_iy.set(marker, ran1.by_offset(marker, 13));
     ran1_iv.set(marker, ran1.by_offset(marker, 116));
     r_refdef_vieworg.set(marker, r_refdef.offset(marker, 112));
     r_refdef_viewangles.set(marker, r_refdef_vieworg.offset(marker, 12));
+    transObjects.set(marker, R_DrawTEntitiesOnList.by_offset(marker, 85));
     client_s_edict_offset.set(marker, Some(19076));
     sv_edicts.set(marker, sv.offset(marker, 244824));
     sv_num_edicts.set(marker, sv.offset(marker, 0x3bc50));
@@ -2214,7 +2590,7 @@ pub mod exported {
 
     #[export_name = "R_DrawSequentialPoly"]
     pub unsafe extern "C" fn my_R_DrawSequentialPoly(
-        surf: *mut c_void,
+        surf: *mut msurface_t,
         face: *mut c_int,
     ) -> *mut c_void {
         abort_on_panic(move || {
@@ -2282,6 +2658,7 @@ pub mod exported {
             let marker = MainThreadMarker::new();
 
             skybox_change::with_changed_name(marker, move || R_LoadSkys.get(marker)());
+            gsr::update_skyname(marker);
         })
     }
 
@@ -2295,6 +2672,8 @@ pub mod exported {
             }
 
             R_PreDrawViewModel.get(marker)();
+
+            force_emit_viewentity_player::save_viewmodel_attachments(marker);
         })
     }
 
@@ -2509,6 +2888,7 @@ pub mod exported {
 
             capture_skip_non_gameplay::on_cl_disconnect(marker);
 
+            gsr::on_cl_disconnect(marker);
             if !capture_video_per_demo::on_cl_disconnect(marker) {
                 capture::on_cl_disconnect(marker);
             }
@@ -2557,6 +2937,19 @@ pub mod exported {
         })
     }
 
+    #[export_name = "R_DrawTEntitiesOnList"]
+    pub unsafe extern "C" fn my_R_DrawTEntitiesOnList(clientOnly: qboolean) {
+        abort_on_panic(move || {
+            let marker = MainThreadMarker::new();
+
+            gsr::save_trans_obj_count(marker);
+
+            R_DrawTEntitiesOnList.get(marker)(clientOnly);
+
+            force_emit_viewentity_player::load_viewmodel_attachments(marker);
+        })
+    }
+
     #[export_name = "R_RenderView"]
     pub unsafe extern "C" fn my_R_RenderView() {
         abort_on_panic(move || {
@@ -2566,6 +2959,8 @@ pub mod exported {
             tas_studio::tas_playback_rendered_views(marker);
 
             R_RenderView.get(marker)();
+
+            gsr::record_frame(marker);
         })
     }
 
@@ -2581,6 +2976,19 @@ pub mod exported {
             fix_widescreen::fix_widescreen_fov(marker);
 
             R_SetFrustum.get(marker)();
+        })
+    }
+
+    #[export_name = "R_StudioClientEvents"]
+    pub unsafe extern "C" fn my_R_StudioClientEvents() {
+        abort_on_panic(move || {
+            let marker = MainThreadMarker::new();
+
+            if force_emit_viewentity_player::should_skip_studio_events(marker) {
+                return;
+            }
+
+            R_StudioClientEvents.get(marker)();
         })
     }
 
@@ -2617,6 +3025,10 @@ pub mod exported {
         abort_on_panic(move || {
             let marker = MainThreadMarker::new();
 
+            if force_emit_viewentity_player::should_override_clientdll_isthirdperson(marker) {
+                return 1;
+            }
+
             if show_player_in_hltv::should_force_emit_player_entity(marker) {
                 return 1;
             }
@@ -2635,6 +3047,19 @@ pub mod exported {
 
                 DrawCrosshair.get(marker)((x as f32 / scale) as i32, (y as f32 / scale) as i32)
             });
+        })
+    }
+
+    #[export_name = "CL_LinkPlayers"]
+    pub unsafe extern "C" fn my_CL_LinkPlayers() {
+        abort_on_panic(move || {
+            let marker = MainThreadMarker::new();
+
+            force_emit_viewentity_player::on_before_cl_linkplayers(marker);
+
+            CL_LinkPlayers.get(marker)();
+
+            force_emit_viewentity_player::on_after_cl_linkplayers(marker);
         })
     }
 

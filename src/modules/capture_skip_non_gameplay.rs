@@ -2,7 +2,7 @@
 
 use super::cvars::CVar;
 use super::{capture, Module};
-use crate::hooks::engine;
+use crate::hooks::engine::{self, cactive_t};
 use crate::utils::*;
 
 pub struct CaptureSkipNonGameplay;
@@ -53,7 +53,7 @@ pub unsafe fn should_record_current_frame(marker: MainThreadMarker) -> bool {
         return true;
     }
 
-    if (&*engine::cls.get(marker)).state != 5 {
+    if (&*engine::cls.get(marker)).state != cactive_t::ca_active {
         // If state is not 5, skip frame.
         // State 4 is still loading.
         return false;
