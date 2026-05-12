@@ -12,7 +12,7 @@ impl Module for ForceEmitViewentityPlayer {
     }
 
     fn description(&self) -> &'static str {
-        "Forcing the engine to add the viewentity player to the list of visible entities every frame"
+        "Forces the engine to add the viewentity player to the list of visible entities every frame"
     }
 
     fn cvars(&self) -> &'static [&'static CVar] {
@@ -101,7 +101,7 @@ pub unsafe fn load_viewmodel_attachments(marker: MainThreadMarker) {
     entity.attachment = *VIEWMODEL_ATTACHMENTS.borrow(marker);
 }
 
-// FIXME: we shouldn't really do this at all technically.
+// TODO: add option for this (maybe you want events from both, or just from player model)
 pub unsafe fn should_skip_studio_events(marker: MainThreadMarker) -> bool {
     if !ForceEmitViewentityPlayer.is_enabled(marker) {
         return false;

@@ -28,6 +28,7 @@ use crate::ffi::entity_state::{entity_state_t, local_state_t};
 use crate::ffi::playermove::playermove_s;
 use crate::ffi::progs::event_state_t;
 use crate::ffi::r_efx::TEMPENTITY;
+use crate::ffi::screenfade::screenfade_t;
 use crate::ffi::triangleapi::triangleapi_s;
 use crate::ffi::usercmd::usercmd_s;
 use crate::ffi::weaponinfo::weapon_data_t;
@@ -37,8 +38,6 @@ use crate::hooks::{bxt, sdl, server};
 use crate::modules::*;
 use crate::utils::*;
 
-pub static AppendTEntity: Pointer<unsafe extern "C" fn(pEnt: *mut cl_entity_t)> =
-    Pointer::empty(b"AppendTEntity\0");
 pub static build_number: Pointer<unsafe extern "C" fn() -> c_int> = Pointer::empty_patterns(
     b"build_number\0",
     // To find, search for "Half-Life %i/%s (hw build %d)". This function is
@@ -129,8 +128,6 @@ pub static CL_IsSpectateOnly: Pointer<unsafe extern "C" fn() -> c_int> = Pointer
     ]),
     null_mut(),
 );
-pub static CL_LinkPacketEntities: Pointer<unsafe extern "C" fn()> =
-    Pointer::empty(b"CL_LinkPacketEntities\0");
 pub static CL_LinkPlayers: Pointer<unsafe extern "C" fn()> =
     Pointer::empty_patterns(b"CL_LinkPlayers\0", Patterns(&[]), my_CL_LinkPlayers as _);
 pub static cl_lightstyle: Pointer<*mut [lightstyle_t; 64]> = Pointer::empty(b"cl_lightstyle\0");
@@ -165,7 +162,6 @@ pub static CL_PlayDemo_f: Pointer<unsafe extern "C" fn()> = Pointer::empty_patte
     ]),
     my_CL_PlayDemo_f as _,
 );
-pub static CL_TempEntInit: Pointer<unsafe extern "C" fn()> = Pointer::empty(b"CL_TempEntInit\0");
 pub static CL_ViewDemo_f: Pointer<unsafe extern "C" fn()> = Pointer::empty_patterns(
     b"CL_ViewDemo_f\0",
     // To find, search for "viewdemo not available".
@@ -214,8 +210,6 @@ pub static ClientDLL_IsThirdPerson: Pointer<unsafe extern "C" fn() -> c_int> =
 pub static cl: Pointer<*mut client_state_t> = Pointer::empty(b"cl\0");
 pub static cl_beamentities: Pointer<*mut [*mut cl_entity_t; 512]> =
     Pointer::empty(b"cl_beamentities\0");
-pub static cl_dlights: Pointer<*mut [dlight_t; 32]> = Pointer::empty(b"cl_dlights\0");
-pub static cl_elights: Pointer<*mut [dlight_t; 64]> = Pointer::empty(b"cl_elights\0");
 pub static cl_entities: Pointer<*mut *mut cl_entity_t> = Pointer::empty(
     // Not a real symbol name.
     b"cl_entities\0",
@@ -316,8 +310,6 @@ pub static Draw_DecalCount: Pointer<unsafe extern "C" fn() -> c_int> =
     Pointer::empty(b"Draw_DecalCount\0");
 pub static Draw_DecalIndex: Pointer<unsafe extern "C" fn(c_int) -> c_int> =
     Pointer::empty(b"Draw_DecalIndex\0");
-pub static Draw_DecalTexture: Pointer<unsafe extern "C" fn(c_int) -> *const texture_t> =
-    Pointer::empty(b"Draw_DecalTexture\0");
 pub static Draw_FillRGBABlend: Pointer<
     unsafe extern "C" fn(c_int, c_int, c_int, c_int, c_int, c_int, c_int, c_int),
 > = Pointer::empty_patterns(
@@ -375,33 +367,13 @@ pub static GL_BeginRendering: Pointer<
     ]),
     null_mut(),
 );
-pub static gDecalCount: Pointer<*mut c_int> = Pointer::empty(
-    // Not a real symbol name.
-    b"gDecalCount\0",
-);
 pub static gDecalPool: Pointer<*mut [decal_t; 4096]> = Pointer::empty(
     // Not a real symbol name.
     b"gDecalPool\0",
 );
-pub static gDecalSurfCount: Pointer<*mut c_int> = Pointer::empty(
-    // Not a real symbol name.
-    b"gDecalSurfCount\0",
-);
-pub static gDecalSurfs: Pointer<*mut [*mut msurface_t; 500]> = Pointer::empty(
-    // Not a real symbol name.
-    b"gDecalSurfs\0",
-);
 pub static gpActiveBeams: Pointer<*mut *mut BEAM> = Pointer::empty(
     // Not a real symbol name.
     b"gpActiveBeams\0",
-);
-pub static gpTempEntActive: Pointer<*mut *mut TEMPENTITY> = Pointer::empty(
-    // Not a real symbol name.
-    b"gpTempEntActive\0",
-);
-pub static gTempEnts: Pointer<*mut [TEMPENTITY; 500]> = Pointer::empty(
-    // Not a real symbol name.
-    b"gTempEnts\0",
 );
 pub static gEntityInterface: Pointer<*mut DllFunctions> = Pointer::empty(b"gEntityInterface\0");
 pub static gLoadSky: Pointer<*mut c_int> = Pointer::empty(b"gLoadSky\0");
@@ -1115,7 +1087,6 @@ pub static Z_Free: Pointer<unsafe extern "C" fn(*mut c_void)> = Pointer::empty_p
 pub static client_s_edict_offset: MainThreadCell<Option<usize>> = MainThreadCell::new(None);
 
 static POINTERS: &[&dyn PointerTrait] = &[
-    &AppendTEntity,
     &build_number,
     &CBaseUI__HideGameUI,
     &Cbuf_AddFilteredText,
@@ -1128,20 +1099,16 @@ static POINTERS: &[&dyn PointerTrait] = &[
     &CL_GameDir_f,
     &CL_IsSpectateOnly,
     &cl_lightstyle,
-    &CL_LinkPacketEntities,
     &CL_LinkPlayers,
     &CL_Move,
     &CL_Parse_LightStyle,
     &CL_PlayDemo_f,
-    &CL_TempEntInit,
     &CL_ViewDemo_f,
     &ClientDLL_Init,
     &ClientDLL_DrawTransparentTriangles,
     &ClientDLL_IsThirdPerson,
     &cl,
-    &cl_dlights,
     &cl_beamentities,
-    &cl_elights,
     &cl_entities,
     &cl_numbeamentities,
     &cl_numvisedicts,
@@ -1166,18 +1133,12 @@ static POINTERS: &[&dyn PointerTrait] = &[
     &DrawCrosshair,
     &Draw_DecalCount,
     &Draw_DecalIndex,
-    &Draw_DecalTexture,
     &Draw_FillRGBABlend,
     &Draw_String,
     &frametime_remainder,
     &GL_BeginRendering,
-    &gDecalCount,
     &gDecalPool,
-    &gDecalSurfCount,
-    &gDecalSurfs,
     &gpActiveBeams,
-    &gpTempEntActive,
-    &gTempEnts,
     &gEntityInterface,
     &gLoadSky,
     &g_svmove,
@@ -1377,11 +1338,25 @@ pub struct cl_entity_s_viewmodel {
     pub angles: [c_float; 3],
 }
 
+#[repr(i32)]
+#[derive(Debug)]
+pub enum resourcetype_t {
+    t_sound = 0,
+    t_skin,
+    t_model,
+    t_decal,
+    t_generic,
+    t_eventscript,
+    t_world,
+    t_strange,
+    t_end,
+}
+
 #[repr(C)]
 #[derive(Debug)]
 pub struct resource_t {
     pub szFileName: [c_char; 64],
-    pub _type: c_int, //enum
+    pub _type: resourcetype_t,
     pub nIndex: c_int,
     pub nDownloadSize: c_int,
     pub ucFlags: c_uchar,
@@ -1513,9 +1488,9 @@ pub struct client_state_t {
 
     pub viewheight: [c_float; 3],
 
-    pub sf: [u8; 24], // make a type for bro :)
+    pub sf: screenfade_t,
 
-    pub paused: c_uint, // not sure....
+    pub paused: qboolean,
 
     pub onground: c_int,
     pub moving: c_int,
@@ -1888,22 +1863,17 @@ unsafe fn find_pointers(marker: MainThreadMarker) {
         pointer.set(marker, ptr);
     }
 
-    cl_entities.set(marker, CL_LinkPacketEntities.by_offset(marker, 101));
+    cl_entities.set(marker, CL_LinkPlayers.by_offset(marker, 137));
     cl_stats.set(marker, cl.offset(marker, 174892));
     cl_viewent.set(marker, cl.offset(marker, 1717500));
     cl_viewent_viewmodel.set(marker, cl_viewent.offset(marker, 2888));
     cls_demoframecount.set(marker, cls.offset(marker, 16776));
     cls_demos.set(marker, cls.offset(marker, 15960));
     frametime_remainder.set(marker, CL_Move.by_offset(marker, 452));
-    gDecalCount.set(marker, R_DecalInit.by_offset(marker, 33));
     gDecalPool.set(marker, R_DecalInit.by_offset(marker, 21));
-    // gDecalSurfCount.set(marker, R_DrawDecals.by_offset(marker, 9));
-    // gDecalSurfs.set(marker, R_DrawDecals.by_offset(marker, 151));
     gpActiveBeams.set(marker, R_BeamAlloc.by_offset(marker, 19));
-    gpTempEntActive.set(marker, CL_TempEntInit.by_offset(marker, 96));
-    gTempEnts.set(marker, CL_TempEntInit.by_offset(marker, 21));
     idum.set(marker, ran1.by_offset(marker, 2));
-    numTransObjs.set(marker, AppendTEntity.by_offset(marker, 11));
+    numTransObjs.set(marker, R_DrawTEntitiesOnList.by_offset(marker, 41));
     ran1_iy.set(marker, ran1.by_offset(marker, 13));
     ran1_iv.set(marker, ran1.by_offset(marker, 116));
     r_refdef_vieworg.set(marker, r_refdef.offset(marker, 112));

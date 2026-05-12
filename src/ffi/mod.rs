@@ -25,6 +25,7 @@ pub mod pmplane;
 pub mod pmtrace;
 pub mod progs;
 pub mod r_efx;
+pub mod screenfade;
 pub mod triangleapi;
 pub mod usercmd;
 pub mod weaponinfo;
